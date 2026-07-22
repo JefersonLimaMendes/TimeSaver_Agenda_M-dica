@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel - Agenda Médica</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-dark bg-primary mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="#">Time Saver - Agenda Médica</a>
+            <a href="/logout" class="btn btn-outline-light btn-sm">Sair</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <input type="text" id="searchInput" class="form-control" placeholder="Buscar por paciente, CPF ou médico...">
+            </div>
+        </div>
+
+        <div id="mensagem" class="alert d-none"></div>
+        <div id="tabela-agenda" class="shadow-sm bg-white"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const msgBox = document.getElementById('mensagem');
+            
+            function showMessage(text, type) {
+                msgBox.className = `alert alert-${type} mt-3`;
+                msgBox.innerText = text;
+            }
+
+            fetch('/api/proxy/agendamentos')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        showMessage(data.error, 'danger');
+                        return;
+                    }
+                    if (data.warning) {
+                        showMessage(data.warning, 'warning');
+                        return;
+                    }
+
+                    const table = new Tabulator("#tabela-agenda", {
+                        data: data,
+                        layout: "fitColumns",
+                        responsiveLayout: "collapse",
+                        placeholder: "Nenhum agendamento encontrado.",
+                        columns: [
+                            {title:"Data", field:"data", width: 100},
+                            {title:"Horário", field:"horario", width: 90},
+                            {title:"Paciente", field:"paciente"},
+                            {title:"CPF", field:"cpf"},
+                            {title:"Médico", field:"medico"},
+                            {title:"Especialidade", field:"especialidade"},
+                            {title:"Convênio", field:"convenio"},
+                            {title:"Status", field:"status"}
+                        ]
+                    });
+
+                    document.getElementById("searchInput").addEventListener("input", function(e){
+                        const termo = e.target.value.toLowerCase();
+                        table.setFilter(function(linha){
+                            return linha.paciente.toLowerCase().includes(termo) ||
+                                   linha.cpf.includes(termo) ||
+                                   linha.medico.toLowerCase().includes(termo);
+                        });
+                        
+                        // Validação de busca vazia
+                        setTimeout(() => {
+                            if(table.getData("active").length === 0){
+                                showMessage("Nenhum registro encontrado para esta busca.", "info");
+                            } else {
+                                msgBox.className = "d-none";
+                            }
+                        }, 100);
+                    });
+                })
+                .catch(error => {
+                    showMessage("Erro inesperado ao conectar com o servidor.", "danger");
+                });
+        });
+    </script>
+</body>
+</html>

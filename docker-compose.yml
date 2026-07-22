@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      # Variável de ambiente configurando a URL da API
+      - API_URL=http://api:5001/api/agendamentos
+      - SECRET_KEY=chave_secreta_timesaver_2026
+    depends_on:
+      - api
+  
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "5001:5001"

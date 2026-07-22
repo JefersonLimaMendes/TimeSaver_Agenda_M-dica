@@ -1,0 +1,18 @@
+#Ambiente Virtual
+venv/
+.venv/
+env/
+
+#Arquivos compilados e caches do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+#Banco de dados local (será gerado no container/init)
+database.db
+
+#Configurações de IDEs
+.vscode/
+.idea/
