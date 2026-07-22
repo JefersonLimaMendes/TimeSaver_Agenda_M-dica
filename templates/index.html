@@ -251,14 +251,13 @@
             const datePicker = document.getElementById('dataPicker');
             const calendarBtn = document.getElementById('dataCalendarBtn');
 
-            // Inicializar Flatpickr no campo de texto para oferecer calendário consistente
-            const fp = flatpickr('#data', {
+            // Inicializar Flatpickr no input oculto para não interferir na digitação manual
+            const fp = flatpickr(datePicker, {
                 dateFormat: 'd/m/Y',
-                allowInput: true,
                 locale: 'pt',
                 disableMobile: false,
                 minDate: 'today',
-                clickOpens: true,
+                clickOpens: false,
                 // Atualiza o input oculto e validações quando a data muda
                 onChange: function(selectedDates, dateStr, instance){
                     if(selectedDates.length){
@@ -278,16 +277,6 @@
             // Ao clicar no botão, abre o flatpickr calendar
             calendarBtn.addEventListener('click', function(){
                 try { fp.open(); } catch(e) { dateInput.focus(); }
-            });
-
-            // Sincronizar quando o input nativo (pode aceitar numpad) mudar
-            datePicker.addEventListener('input', function(){
-                const iso = this.value; // YYYY-MM-DD
-                    if(iso){
-                        dateInput.value = isoToDdmm(iso);
-                        try { fp.setDate(isoToDdmm(iso), true); } catch(e) {}
-                }
-                setMinDateTime();
             });
 
             // Use beforeinput to reliably handle numeric entry (including numpad) and deletions
