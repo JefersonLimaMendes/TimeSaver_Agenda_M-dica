@@ -32,6 +32,15 @@ def test_login_invalido(client):
     assert b'Credenciais' in response.data
 
 
+def test_cadastro_manual_de_usuario(client):
+    """Garante que um novo usuário pode se cadastrar manualmente e entrar."""
+    response = client.post('/register', data={'username': 'novo_user', 'password': '123456'}, follow_redirects=False)
+    assert response.status_code == 302
+
+    login_response = client.post('/login', data={'username': 'novo_user', 'password': '123456'})
+    assert login_response.status_code == 302
+
+
 def test_cadastro_agendamento_sem_login(client):
     response = client.post('/api/agendamentos', json={
         'data': '30/07/2026',
@@ -76,3 +85,37 @@ def test_cadastro_e_listagem_agendamento_com_login(client):
     listagem_json = listagem_response.get_json()
 
     assert any(item['paciente'] == 'Maria Teste' for item in listagem_json)
+
+
+def test_delecao_agendamento_sem_login(client):
+    response = client.delete('/api/agendamentos/1')
+    assert response.status_code == 401
+
+
+def test_cadastro_e_delecao_agendamento_com_login(client):
+    login_response = client.post(
+        '/login',
+        data={'username': 'admin', 'password': 'admin123'},
+        follow_redirects=False
+    )
+    assert login_response.status_code == 302
+
+    cadastro_response = client.post('/api/agendamentos', json={
+        'data': '31/07/2026',
+        'horario': '11:00',
+        'paciente': 'Paciente Delecao',
+        'cpf': '000.111.222-33',
+        'medico': 'Dr. Delete',
+        'especialidade': 'Clínico',
+        'convenio': 'Particular',
+        'status': 'Pendente'
+    })
+    assert cadastro_response.status_code == 201
+    agendamento_id = cadastro_response.get_json()['id']
+
+    delecao_response = client.delete(f'/api/agendamentos/{agendamento_id}')
+    assert delecao_response.status_code == 200
+
+    listagem_response = client.get('/api/agendamentos')
+    listagem_json = listagem_response.get_json()
+    assert all(item['id'] != agendamento_id for item in listagem_json)

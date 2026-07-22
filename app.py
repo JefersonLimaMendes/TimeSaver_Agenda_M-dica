@@ -11,7 +11,39 @@ API_URL = os.environ.get('API_URL', 'http://localhost:5001/api/agendamentos')
 # Configuração de logs para facilitar identificação de problemas
 logging.basicConfig(level=logging.INFO)
 
+
+def ensure_database_ready():
+    try:
+        conn = sqlite3.connect('database.db')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password TEXT NOT NULL
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS agendamentos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data TEXT NOT NULL,
+                horario TEXT NOT NULL,
+                paciente TEXT NOT NULL,
+                cpf TEXT NOT NULL,
+                medico TEXT NOT NULL,
+                especialidade TEXT NOT NULL,
+                convenio TEXT NOT NULL,
+                status TEXT NOT NULL
+            )
+        ''')
+        conn.execute('INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)', ('admin', 'admin123'))
+        conn.commit()
+        conn.close()
+    except sqlite3.Error as e:
+        app.logger.error(f"Erro ao inicializar o banco de dados: {e}")
+
+
 def get_db_connection():
+    ensure_database_ready()
     try:
         conn = sqlite3.connect('database.db')
         conn.row_factory = sqlite3.Row
@@ -48,8 +80,12 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+
+        if not username or not password:
+            flash('Preencha usuário e senha.', 'danger')
+            return render_template('login.html')
 
         conn = get_db_connection()
         if not conn:
@@ -67,6 +103,36 @@ def login():
             flash('Credenciais inválidas. Verifique seu usuário e senha.', 'danger')
 
     return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+
+        if not username or not password:
+            flash('Preencha usuário e senha para cadastrar.', 'danger')
+            return render_template('register.html')
+
+        conn = get_db_connection()
+        if not conn:
+            flash('Erro interno: Não foi possível conectar ao banco de dados.', 'danger')
+            return render_template('register.html')
+
+        existing_user = conn.execute('SELECT id FROM users WHERE username = ?', (username,)).fetchone()
+        if existing_user:
+            conn.close()
+            flash('Usuário já existe. Escolha outro nome.', 'warning')
+            return render_template('register.html')
+
+        conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, password))
+        conn.commit()
+        conn.close()
+
+        flash('Usuário cadastrado com sucesso. Faça login.', 'success')
+        return redirect(url_for('login'))
+
+    return render_template('register.html')
 
 @app.route('/logout')
 def logout():
@@ -161,6 +227,25 @@ def cadastrar_agendamento_local():
     conn.close()
 
     return jsonify(agendamento), 201
+
+
+@app.route('/api/agendamentos/<int:agendamento_id>', methods=['DELETE'])
+def deletar_agendamento_local(agendamento_id):
+    if not _is_authenticated():
+        return jsonify({'error': 'Não autorizado'}), 401
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Falha ao conectar com o banco de dados.'}), 500
+
+    cursor = conn.execute('DELETE FROM agendamentos WHERE id = ?', (agendamento_id,))
+    conn.commit()
+    conn.close()
+
+    if cursor.rowcount == 0:
+        return jsonify({'error': 'Agendamento não encontrado.'}), 404
+
+    return jsonify({'message': 'Agendamento removido com sucesso.'}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

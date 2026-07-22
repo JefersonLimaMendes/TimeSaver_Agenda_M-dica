@@ -22,16 +22,16 @@
                 <h5 class="card-title mb-3">Cadastrar agendamento</h5>
                 <form id="cadastroForm" class="row g-2">
                     <div class="col-md-2">
-                        <input type="text" class="form-control" id="data" placeholder="Data" required>
+                        <input type="date" class="form-control" id="data" placeholder="Data" required>
                     </div>
                     <div class="col-md-2">
-                        <input type="text" class="form-control" id="horario" placeholder="Horário" required>
+                        <input type="time" class="form-control" id="horario" placeholder="Horário" required>
                     </div>
                     <div class="col-md-4">
                         <input type="text" class="form-control" id="paciente" placeholder="Paciente" required>
                     </div>
                     <div class="col-md-4">
-                        <input type="text" class="form-control" id="cpf" placeholder="CPF" required>
+                        <input type="text" class="form-control" id="cpf" placeholder="CPF" maxlength="14" pattern="\d{3}\.\d{3}\.\d{3}-\d{2}" title="Formato: 000.000.000-00" required>
                     </div>
                     <div class="col-md-4">
                         <input type="text" class="form-control" id="medico" placeholder="Médico" required>
@@ -64,18 +64,78 @@
         </div>
 
         <div id="mensagem" class="alert d-none"></div>
+        <div id="acao-rapida" class="mb-3"></div>
         <div id="tabela-agenda" class="shadow-sm bg-white"></div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const msgBox = document.getElementById('mensagem');
+            const acaoRapida = document.getElementById('acao-rapida');
             const cadastroForm = document.getElementById('cadastroForm');
             let table;
+            let ultimoCadastroLocal = null;
+
+            function buildRowData(rawItem, source, externalIndex) {
+                const item = { ...rawItem };
+                if (source === 'local') {
+                    item._row_id = `local-${item.id}`;
+                } else {
+                    item._row_id = `externo-${externalIndex}`;
+                }
+                item._is_local = source === 'local';
+                return item;
+            }
             
-            function showMessage(text, type) {
-                msgBox.className = `alert alert-${type} mt-3`;
-                msgBox.innerText = text;
+            function showMessage(text, type, timeout=4000) {
+                msgBox.className = `alert alert-${type} mt-3 alert-dismissible`;
+                msgBox.innerHTML = text + '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+                msgBox.classList.remove('d-none');
+                if (timeout) {
+                    setTimeout(() => { msgBox.className = 'd-none'; msgBox.innerText = ''; }, timeout);
+                }
+            }
+
+            function limparAcaoRapida() {
+                acaoRapida.innerHTML = '';
+                ultimoCadastroLocal = null;
+            }
+
+            function renderAcaoRapida(agendamento) {
+                acaoRapida.innerHTML = `
+                    <button id="deletar-ultimo" class="btn btn-outline-danger btn-sm" type="button">
+                        Deletar último cadastro salvo
+                    </button>
+                `;
+                ultimoCadastroLocal = agendamento;
+
+                document.getElementById('deletar-ultimo').addEventListener('click', function() {
+                    if (!ultimoCadastroLocal) {
+                        return;
+                    }
+
+                    fetch(`/api/agendamentos/${ultimoCadastroLocal.id}`, {
+                        method: 'DELETE'
+                    })
+                        .then(response => response.json().then(body => ({ ok: response.ok, body })))
+                        .then(({ ok, body }) => {
+                            if (!ok) {
+                                showMessage(body.error || 'Falha ao deletar agendamento.', 'danger');
+                                return;
+                            }
+
+                            const row = table.getRow(ultimoCadastroLocal._row_id);
+                            if (row) {
+                                row.delete();
+                            }
+
+                            limparAcaoRapida();
+                            showMessage('Último cadastro removido com sucesso.', 'success');
+                        })
+                        .catch(() => {
+                            showMessage('Erro inesperado ao deletar agendamento.', 'danger');
+                        });
+                });
             }
 
             function getFormData() {
@@ -91,6 +151,38 @@
                 };
             }
 
+            // Formatar CPF enquanto digita (000.000.000-00)
+            const cpfInput = document.getElementById('cpf');
+            function formatCPF(value){
+                const digits = value.replace(/\D/g,'').slice(0,11);
+                let res = digits;
+                if(digits.length > 9) res = digits.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
+                else if(digits.length > 6) res = digits.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
+                else if(digits.length > 3) res = digits.replace(/(\d{3})(\d{1,3})/, '$1.$2');
+                return res;
+            }
+            cpfInput.addEventListener('input', (e)=>{ const pos = e.target.selectionStart; e.target.value = formatCPF(e.target.value); });
+
+            // Impedir datas passadas: ajustar min do input date e validar no submit
+            const dateInput = document.getElementById('data');
+            const timeInput = document.getElementById('horario');
+            function setMinDateTime(){
+                const now = new Date();
+                const today = now.toISOString().split('T')[0];
+                dateInput.setAttribute('min', today);
+                // se a data selecionada for hoje, ajuste min do horário para agora
+                if(dateInput.value === today){
+                    const hh = String(now.getHours()).padStart(2,'0');
+                    const mm = String(now.getMinutes()).padStart(2,'0');
+                    timeInput.setAttribute('min', `${hh}:${mm}`);
+                } else {
+                    timeInput.removeAttribute('min');
+                }
+            }
+            // Atualiza min quando a data muda ou ao carregar
+            dateInput.addEventListener('change', setMinDateTime);
+            window.addEventListener('load', setMinDateTime);
+
             Promise.all([
                 fetch('/api/proxy/agendamentos')
                     .then(response => response.json())
@@ -102,14 +194,12 @@
                 .then(([externos, locais]) => {
                     const externosLista = Array.isArray(externos) ? externos : [];
                     const locaisLista = Array.isArray(locais) ? locais : [];
+                    const locaisComMeta = locaisLista.map(item => buildRowData(item, 'local'));
+                    const externosComMeta = externosLista.map((item, index) => buildRowData(item, 'externo', index));
 
                     if (locais.error) {
                         showMessage(locais.error, 'danger');
                         return;
-                    }
-
-                    if (externos.error) {
-                        showMessage('API externa indisponível. Exibindo apenas agendamentos locais.', 'warning');
                     }
 
                     if (externos.warning) {
@@ -117,7 +207,8 @@
                     }
 
                     table = new Tabulator("#tabela-agenda", {
-                        data: [...locaisLista, ...externosLista],
+                        data: [...locaisComMeta, ...externosComMeta],
+                        index: "_row_id",
                         layout: "fitColumns",
                         responsiveLayout: "collapse",
                         placeholder: "Nenhum agendamento encontrado.",
@@ -129,7 +220,45 @@
                             {title:"Médico", field:"medico"},
                             {title:"Especialidade", field:"especialidade"},
                             {title:"Convênio", field:"convenio"},
-                            {title:"Status", field:"status"}
+                            {title:"Origem", field:"_is_local", hozAlign:"center", formatter:function(cell){
+                                    return cell.getValue() ? "<span class='badge bg-success'>Local</span>" : "<span class='badge bg-secondary'>Externo</span>";
+                                }, width:90},
+                            {title:"Status", field:"status"},
+                            {
+                                title:"Ações",
+                                field:"_is_local",
+                                hozAlign:"center",
+                                width: 120,
+                                formatter: function(cell) {
+                                    return cell.getValue() ? "<button class='btn btn-sm btn-outline-danger'>Deletar</button>" : "";
+                                },
+                                cellClick: function(e, cell) {
+                                    const rowData = cell.getRow().getData();
+                                    if (!rowData._is_local) {
+                                        return;
+                                    }
+
+                                    fetch(`/api/agendamentos/${rowData.id}`, {
+                                        method: 'DELETE'
+                                    })
+                                        .then(response => response.json().then(body => ({ ok: response.ok, body })))
+                                        .then(({ ok, body }) => {
+                                            if (!ok) {
+                                                showMessage(body.error || 'Falha ao deletar agendamento.', 'danger');
+                                                return;
+                                            }
+
+                                            cell.getRow().delete();
+                                            if (ultimoCadastroLocal && ultimoCadastroLocal.id === rowData.id) {
+                                                limparAcaoRapida();
+                                            }
+                                            showMessage('Agendamento deletado com sucesso.', 'success');
+                                        })
+                                        .catch(() => {
+                                            showMessage('Erro inesperado ao deletar agendamento.', 'danger');
+                                        });
+                                }
+                            }
                         ]
                     });
 
@@ -159,6 +288,18 @@
 
                         const payload = getFormData();
 
+                        // Validação: não permitir data/hora no passado
+                        if(!payload.data || !payload.horario){
+                            showMessage('Preencha data e horário.', 'warning');
+                            return;
+                        }
+                        const dt = new Date(payload.data + 'T' + payload.horario);
+                        const now = new Date();
+                        if(dt < now){
+                            showMessage('Data e horário devem ser futuros.', 'warning');
+                            return;
+                        }
+
                         fetch('/api/agendamentos', {
                             method: 'POST',
                             headers: {
@@ -173,9 +314,11 @@
                                     return;
                                 }
 
-                                table.addData([body], true);
+                                const novoItem = buildRowData(body, 'local');
+                                table.addData([novoItem], true);
                                 cadastroForm.reset();
                                 showMessage('Agendamento cadastrado com sucesso.', 'success');
+                                renderAcaoRapida(novoItem);
                             })
                             .catch(() => {
                                 showMessage('Erro inesperado ao cadastrar agendamento.', 'danger');
@@ -187,5 +330,6 @@
                 });
         });
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
