@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import bcrypt
 
 def init():
     #Remove o banco se já existir para criar um ambiente limpo
@@ -32,7 +33,10 @@ def init():
     ''')
     
     #Inserção do usuário de teste
-    conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', ('admin', 'admin123'))
+    # Hash da senha padrão usando bcrypt
+    admin_pass = 'admin123'.encode('utf-8')
+    admin_hash = bcrypt.hashpw(admin_pass, bcrypt.gensalt())
+    conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', ('admin', admin_hash))
     conn.commit()
     conn.close()
     print("Banco de dados 'database.db' inicializado com sucesso!")

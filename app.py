@@ -3,6 +3,7 @@ import sqlite3
 import requests
 import os
 import logging
+import bcrypt
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'chave_secreta_padrao')
@@ -35,7 +36,17 @@ def ensure_database_ready():
                 status TEXT NOT NULL
             )
         ''')
-        conn.execute('INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)', ('admin', 'admin123'))
+        # Inserir usuário admin com senha hasheada (bcrypt)
+        admin_pass = 'admin123'.encode('utf-8')
+        admin_hash = bcrypt.hashpw(admin_pass, bcrypt.gensalt())
+        conn.execute('INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)', ('admin', admin_hash))
+
+        # Inserir usuários de exemplo (5) com senha padrão 'senha123' (hasheada)
+        sample_users = ['alice', 'bruno', 'carla', 'daniel', 'elaine']
+        for u in sample_users:
+            pw = 'senha123'.encode('utf-8')
+            pw_hash = bcrypt.hashpw(pw, bcrypt.gensalt())
+            conn.execute('INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)', (u, pw_hash))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -92,15 +103,21 @@ def login():
             flash('Erro interno: Não foi possível conectar ao banco de dados.', 'danger')
             return render_template('login.html')
 
-        user = conn.execute('SELECT * FROM users WHERE username = ? AND password = ?', 
-                            (username, password)).fetchone()
+        user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
         conn.close()
 
         if user:
-            session['user_id'] = user['id']
-            return redirect(url_for('index'))
-        else:
-            flash('Credenciais inválidas. Verifique seu usuário e senha.', 'danger')
+            stored = user['password']
+            if isinstance(stored, str):
+                stored_bytes = stored.encode('utf-8')
+            else:
+                stored_bytes = stored
+
+            if bcrypt.checkpw(password.encode('utf-8'), stored_bytes):
+                session['user_id'] = user['id']
+                return redirect(url_for('index'))
+
+        flash('Credenciais inválidas. Verifique seu usuário e senha.', 'danger')
 
     return render_template('login.html')
 
@@ -125,7 +142,9 @@ def register():
             flash('Usuário já existe. Escolha outro nome.', 'warning')
             return render_template('register.html')
 
-        conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, password))
+        # Hash da senha com bcrypt antes de salvar
+        pw_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, pw_hash))
         conn.commit()
         conn.close()
 
@@ -138,6 +157,27 @@ def register():
 def logout():
     session.pop('user_id', None)
     return redirect(url_for('login'))
+
+
+@app.route('/users')
+def users_page():
+    if not _is_authenticated():
+        return redirect(url_for('login'))
+    return render_template('users.html')
+
+
+@app.route('/api/users', methods=['GET'])
+def api_users_list():
+    if not _is_authenticated():
+        return jsonify({'error': 'Não autorizado'}), 401
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Falha ao conectar com o banco de dados.'}), 500
+
+    rows = conn.execute('SELECT id, username FROM users ORDER BY id DESC').fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
 
 @app.route('/api/proxy/agendamentos', methods=['GET'])
 def proxy_agendamentos():

@@ -7,6 +7,24 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://unpkg.com/tabulator-tables@5.5.2/dist/css/tabulator_bootstrap5.min.css" rel="stylesheet">
     <script src="https://unpkg.com/tabulator-tables@5.5.2/dist/js/tabulator.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <style>
+        /* Botão calendário quadrado com ícone centralizado */
+        #dataCalendarBtn {
+            width: 40px;
+            padding: 0.25rem 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.25rem;
+        }
+        #dataCalendarBtn svg {
+            width: 18px;
+            height: 18px;
+            display: block;
+        }
+    </style>
 </head>
 <body class="bg-light">
     <nav class="navbar navbar-dark bg-primary mb-4">
@@ -22,7 +40,18 @@
                 <h5 class="card-title mb-3">Cadastrar agendamento</h5>
                 <form id="cadastroForm" class="row g-2">
                     <div class="col-md-2">
-                        <input type="date" class="form-control" id="data" placeholder="Data" required>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="data" placeholder="DD/MM/YYYY" inputmode="numeric" pattern="\d{2}/\d{2}/\d{4}" maxlength="10" required>
+                            <button class="btn btn-outline-secondary" id="dataCalendarBtn" type="button" title="Abrir calendário" aria-label="Abrir calendário">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="3" y="4" width="18" height="18" rx="2"></rect>
+                                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                                </svg>
+                            </button>
+                            <input type="date" id="dataPicker" style="display:none;" aria-hidden="true">
+                        </div>
                     </div>
                     <div class="col-md-2">
                         <input type="time" class="form-control" id="horario" placeholder="Horário" required>
@@ -139,8 +168,10 @@
             }
 
             function getFormData() {
+                const rawDate = document.getElementById('data').value.trim();
+                const isoDate = ddmmyyyyToIso(rawDate) || rawDate;
                 return {
-                    data: document.getElementById('data').value.trim(),
+                    data: isoDate,
                     horario: document.getElementById('horario').value.trim(),
                     paciente: document.getElementById('paciente').value.trim(),
                     cpf: document.getElementById('cpf').value.trim(),
@@ -168,10 +199,14 @@
             const timeInput = document.getElementById('horario');
             function setMinDateTime(){
                 const now = new Date();
-                const today = now.toISOString().split('T')[0];
-                dateInput.setAttribute('min', today);
+                const todayIso = now.toISOString().split('T')[0];
+                // guardamos min em data-min para referência
+                dateInput.setAttribute('data-min', todayIso);
+                // ajustar minDate do flatpickr também
+                try { fp.set('minDate', todayIso); } catch(e) {}
                 // se a data selecionada for hoje, ajuste min do horário para agora
-                if(dateInput.value === today){
+                const selectedIso = ddmmyyyyToIso(dateInput.value || '');
+                if(selectedIso === todayIso){
                     const hh = String(now.getHours()).padStart(2,'0');
                     const mm = String(now.getMinutes()).padStart(2,'0');
                     timeInput.setAttribute('min', `${hh}:${mm}`);
@@ -179,6 +214,243 @@
                     timeInput.removeAttribute('min');
                 }
             }
+            // Funções para manipular formato DD/MM/YYYY <-> YYYY-MM-DD
+            function ddmmyyyyToIso(v){
+                if(!v) return '';
+                const parts = v.split('/');
+                if(parts.length !== 3) return v;
+                const [d,m,y] = parts;
+                if(d.length !== 2 || m.length !== 2 || y.length !== 4) return v;
+                return `${y}-${m}-${d}`;
+            }
+            function isoToDdmm(v){
+                if(!v) return '';
+                const parts = v.split('-');
+                if(parts.length !== 3) return v;
+                const [y,m,d] = parts;
+                return `${d.padStart(2,'0')}/${m.padStart(2,'0')}/${y}`;
+            }
+
+            // Formatar data enquanto digita (DD/MM/YYYY) e aceitar teclado numérico (NumLock)
+            function formatDateInput(value){
+                const digits = value.replace(/\D/g,'').slice(0,8);
+                let res = digits;
+                if(digits.length >= 5) res = digits.replace(/(\d{2})(\d{2})(\d{1,4})/, '$1/$2/$3');
+                else if(digits.length >= 3) res = digits.replace(/(\d{2})(\d{1,2})/, '$1/$2');
+                return res;
+            }
+
+            // Converter número de dígitos já digitados para posição do caret
+            function digitCountToCaretPos(n){
+                if(n <= 0) return 0;
+                if(n <= 2) return n; // DD
+                if(n <= 4) return n + 1; // DD/MM -> add one slash
+                return n + 2; // DD/MM/YYYY -> add two slashes
+            }
+
+            const datePicker = document.getElementById('dataPicker');
+            const calendarBtn = document.getElementById('dataCalendarBtn');
+
+            // Inicializar Flatpickr no campo de texto para oferecer calendário consistente
+            const fp = flatpickr('#data', {
+                dateFormat: 'd/m/Y',
+                allowInput: true,
+                locale: 'pt',
+                disableMobile: false,
+                minDate: 'today',
+                clickOpens: true,
+                // Atualiza o input oculto e validações quando a data muda
+                onChange: function(selectedDates, dateStr, instance){
+                    if(selectedDates.length){
+                        datePicker.value = selectedDates[0].toISOString().split('T')[0];
+                        dateInput.value = isoToDdmm(datePicker.value);
+                    } else {
+                        datePicker.value = '';
+                    }
+                    setMinDateTime();
+                },
+                onReady: function(selectedDates, dateStr, instance){
+                    // Garante minDate coerente ao iniciar
+                    setMinDateTime();
+                }
+            });
+
+            // Ao clicar no botão, abre o flatpickr calendar
+            calendarBtn.addEventListener('click', function(){
+                try { fp.open(); } catch(e) { dateInput.focus(); }
+            });
+
+            // Sincronizar quando o input nativo (pode aceitar numpad) mudar
+            datePicker.addEventListener('input', function(){
+                const iso = this.value; // YYYY-MM-DD
+                    if(iso){
+                        dateInput.value = isoToDdmm(iso);
+                        try { fp.setDate(isoToDdmm(iso), true); } catch(e) {}
+                }
+                setMinDateTime();
+            });
+
+            // Use beforeinput to reliably handle numeric entry (including numpad) and deletions
+            dateInput.addEventListener('beforeinput', function(e){
+                const el = e.target;
+                const type = e.inputType;
+                const data = e.data;
+
+                // Helper to set caret after N digits
+                function setCaretAfterDigits(n){
+                    const pos = digitCountToCaretPos(n);
+                    el.setSelectionRange(pos,pos);
+                }
+
+                // Insert digit
+                if(type === 'insertText' && /\d/.test(data)){
+                    e.preventDefault();
+                    const caret = el.selectionStart || 0;
+                    const digitsBefore = (el.value.slice(0, caret).match(/\d/g) || []).length;
+                    let raw = (el.value.replace(/\D/g,'')).slice(0,8);
+                    raw = (raw.slice(0,digitsBefore) + data + raw.slice(digitsBefore)).slice(0,8);
+                    el.value = formatDateInput(raw);
+                        const newPos = digitCountToCaretPos(digitsBefore + 1);
+                        el.setSelectionRange(newPos, newPos);
+                    const iso = ddmmyyyyToIso(el.value);
+                    if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) datePicker.value = iso;
+                    setMinDateTime();
+                    return;
+                }
+
+                // Backspace
+                if(type === 'deleteContentBackward'){
+                    e.preventDefault();
+                    const caret = el.selectionStart || 0;
+                    const digitsBefore = (el.value.slice(0, caret).match(/\d/g) || []).length;
+                    if(digitsBefore === 0) return; // nothing to delete
+                    let raw = el.value.replace(/\D/g,'');
+                    raw = raw.slice(0, digitsBefore-1) + raw.slice(digitsBefore);
+                    el.value = formatDateInput(raw);
+                    const newPos = digitCountToCaretPos(Math.max(0, digitsBefore-1));
+                    el.setSelectionRange(newPos, newPos);
+                    const iso = ddmmyyyyToIso(el.value);
+                    if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) datePicker.value = iso;
+                    setMinDateTime();
+                    return;
+                }
+
+                // Delete (forward)
+                if(type === 'deleteContentForward'){
+                    e.preventDefault();
+                    const caret = el.selectionStart || 0;
+                    const digitsBefore = (el.value.slice(0, caret).match(/\d/g) || []).length;
+                    let raw = el.value.replace(/\D/g,'');
+                    raw = raw.slice(0, digitsBefore) + raw.slice(digitsBefore+1);
+                    el.value = formatDateInput(raw);
+                    const newPosDel = digitCountToCaretPos(digitsBefore);
+                    el.setSelectionRange(newPosDel, newPosDel);
+                    const iso = ddmmyyyyToIso(el.value);
+                    if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) datePicker.value = iso;
+                    setMinDateTime();
+                    return;
+                }
+
+                // For other input types (paste, etc.) allow default and then normalize on paste event
+            });
+
+            // Handle paste: extract digits from clipboard and format into the field
+            dateInput.addEventListener('paste', function(e){
+                e.preventDefault();
+                const paste = (e.clipboardData || window.clipboardData).getData('text') || '';
+                const digits = paste.replace(/\D/g,'');
+                if(!digits) return;
+                const el = e.target;
+                const caret = el.selectionStart || 0;
+                const digitsBefore = (el.value.slice(0, caret).match(/\d/g) || []).length;
+                let raw = (el.value.replace(/\D/g,'')).slice(0,8);
+                raw = (raw.slice(0,digitsBefore) + digits + raw.slice(digitsBefore)).slice(0,8);
+                el.value = formatDateInput(raw);
+                const newPos = digitCountToCaretPos(Math.min(8, digitsBefore + digits.length));
+                el.setSelectionRange(newPos, newPos);
+                const iso = ddmmyyyyToIso(el.value);
+                if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) datePicker.value = iso;
+                setMinDateTime();
+            });
+
+            // Handle paste: extract digits and format
+            dateInput.addEventListener('keydown', function(e){
+                const el = e.target;
+                const caret = el.selectionStart || 0;
+
+                // Allow navigation keys
+                const navKeys = ['ArrowLeft','ArrowRight','Tab','Home','End','Shift','Control','Alt'];
+                if(navKeys.includes(e.key)) return;
+
+                // Determine digit from various key properties (Chrome/Windows compatibility)
+                let digit = null;
+                if(/^[0-9]$/.test(e.key)) digit = e.key;
+                else if(e.code && e.code.startsWith('Numpad')){
+                    const c = e.code.replace('Numpad','');
+                    if(/^[0-9]$/.test(c)) digit = c;
+                } else if(typeof e.which === 'number' && e.which >= 96 && e.which <= 105){
+                    digit = String(e.which - 96);
+                }
+
+                if(digit !== null){
+                    e.preventDefault();
+                    const digitsBefore = (el.value.slice(0, caret).match(/\d/g) || []).length;
+                    let raw = (el.value.replace(/\D/g,'')).slice(0,8);
+                    raw = (raw.slice(0,digitsBefore) + digit + raw.slice(digitsBefore)).slice(0,8);
+                    el.value = formatDateInput(raw);
+                    const newPos = digitCountToCaretPos(digitsBefore+1);
+                    el.setSelectionRange(newPos,newPos);
+                    const iso = ddmmyyyyToIso(el.value);
+                    if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) datePicker.value = iso;
+                    setMinDateTime();
+                    return;
+                }
+
+                // Handle Backspace/Delete
+                if(e.key === 'Backspace' || e.key === 'Delete'){
+                    e.preventDefault();
+                    const digitsBefore = (el.value.slice(0, caret).match(/\d/g) || []).length;
+                    let raw = el.value.replace(/\D/g,'');
+                    if(e.key === 'Backspace'){
+                        if(digitsBefore === 0) return;
+                        raw = raw.slice(0, digitsBefore-1) + raw.slice(digitsBefore);
+                        const targetDigits = Math.max(0, digitsBefore-1);
+                        el.value = formatDateInput(raw);
+                        const newPos = digitCountToCaretPos(targetDigits);
+                        el.setSelectionRange(newPos,newPos);
+                    } else {
+                        // Delete forward
+                        raw = raw.slice(0, digitsBefore) + raw.slice(digitsBefore+1);
+                        el.value = formatDateInput(raw);
+                        const newPos = digitCountToCaretPos(digitsBefore);
+                        el.setSelectionRange(newPos,newPos);
+                    }
+                    const iso = ddmmyyyyToIso(el.value);
+                    if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) datePicker.value = iso;
+                    setMinDateTime();
+                    return;
+                }
+            });
+
+            // Fallback: normaliza o valor em entradas aceleradas ou eventos que o navegador não trate corretamente
+            dateInput.addEventListener('input', function(e){
+                const el = e.target;
+                const caret = el.selectionStart || el.value.length;
+                const digitsBefore = (el.value.slice(0, caret).match(/\d/g) || []).length;
+                const raw = el.value.replace(/\D/g,'').slice(0,8);
+                const formatted = formatDateInput(raw);
+
+                if(el.value !== formatted){
+                    el.value = formatted;
+                    const newPos = digitCountToCaretPos(Math.min(digitsBefore, raw.length));
+                    el.setSelectionRange(newPos, newPos);
+                }
+
+                const iso = ddmmyyyyToIso(el.value);
+                if(/^\d{4}-\d{2}-\d{2}$/.test(iso)) datePicker.value = iso;
+                setMinDateTime();
+            });
+
             // Atualiza min quando a data muda ou ao carregar
             dateInput.addEventListener('change', setMinDateTime);
             window.addEventListener('load', setMinDateTime);
@@ -220,9 +492,6 @@
                             {title:"Médico", field:"medico"},
                             {title:"Especialidade", field:"especialidade"},
                             {title:"Convênio", field:"convenio"},
-                            {title:"Origem", field:"_is_local", hozAlign:"center", formatter:function(cell){
-                                    return cell.getValue() ? "<span class='badge bg-success'>Local</span>" : "<span class='badge bg-secondary'>Externo</span>";
-                                }, width:90},
                             {title:"Status", field:"status"},
                             {
                                 title:"Ações",
