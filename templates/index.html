@@ -17,6 +17,46 @@
     </nav>
 
     <div class="container">
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Cadastrar agendamento</h5>
+                <form id="cadastroForm" class="row g-2">
+                    <div class="col-md-2">
+                        <input type="text" class="form-control" id="data" placeholder="Data" required>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="text" class="form-control" id="horario" placeholder="Horário" required>
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" class="form-control" id="paciente" placeholder="Paciente" required>
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" class="form-control" id="cpf" placeholder="CPF" required>
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" class="form-control" id="medico" placeholder="Médico" required>
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" class="form-control" id="especialidade" placeholder="Especialidade" required>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="text" class="form-control" id="convenio" placeholder="Convênio" required>
+                    </div>
+                    <div class="col-md-2">
+                        <select id="status" class="form-select" required>
+                            <option value="">Status</option>
+                            <option value="Confirmado">Confirmado</option>
+                            <option value="Pendente">Pendente</option>
+                            <option value="Cancelado">Cancelado</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">Salvar agendamento</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div class="row mb-3">
             <div class="col-md-6">
                 <input type="text" id="searchInput" class="form-control" placeholder="Buscar por paciente, CPF ou médico...">
@@ -30,26 +70,54 @@
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const msgBox = document.getElementById('mensagem');
+            const cadastroForm = document.getElementById('cadastroForm');
+            let table;
             
             function showMessage(text, type) {
                 msgBox.className = `alert alert-${type} mt-3`;
                 msgBox.innerText = text;
             }
 
-            fetch('/api/proxy/agendamentos')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        showMessage(data.error, 'danger');
-                        return;
-                    }
-                    if (data.warning) {
-                        showMessage(data.warning, 'warning');
+            function getFormData() {
+                return {
+                    data: document.getElementById('data').value.trim(),
+                    horario: document.getElementById('horario').value.trim(),
+                    paciente: document.getElementById('paciente').value.trim(),
+                    cpf: document.getElementById('cpf').value.trim(),
+                    medico: document.getElementById('medico').value.trim(),
+                    especialidade: document.getElementById('especialidade').value.trim(),
+                    convenio: document.getElementById('convenio').value.trim(),
+                    status: document.getElementById('status').value.trim()
+                };
+            }
+
+            Promise.all([
+                fetch('/api/proxy/agendamentos')
+                    .then(response => response.json())
+                    .catch(() => ({ error: 'Serviço de agendamentos temporariamente indisponível.' })),
+                fetch('/api/agendamentos')
+                    .then(response => response.json())
+                    .catch(() => ({ error: 'Falha ao carregar agendamentos locais.' }))
+            ])
+                .then(([externos, locais]) => {
+                    const externosLista = Array.isArray(externos) ? externos : [];
+                    const locaisLista = Array.isArray(locais) ? locais : [];
+
+                    if (locais.error) {
+                        showMessage(locais.error, 'danger');
                         return;
                     }
 
-                    const table = new Tabulator("#tabela-agenda", {
-                        data: data,
+                    if (externos.error) {
+                        showMessage('API externa indisponível. Exibindo apenas agendamentos locais.', 'warning');
+                    }
+
+                    if (externos.warning) {
+                        showMessage(externos.warning, 'warning');
+                    }
+
+                    table = new Tabulator("#tabela-agenda", {
+                        data: [...locaisLista, ...externosLista],
                         layout: "fitColumns",
                         responsiveLayout: "collapse",
                         placeholder: "Nenhum agendamento encontrado.",
@@ -68,12 +136,15 @@
                     document.getElementById("searchInput").addEventListener("input", function(e){
                         const termo = e.target.value.toLowerCase();
                         table.setFilter(function(linha){
-                            return linha.paciente.toLowerCase().includes(termo) ||
-                                   linha.cpf.includes(termo) ||
-                                   linha.medico.toLowerCase().includes(termo);
+                            const paciente = (linha.paciente || '').toLowerCase();
+                            const cpf = (linha.cpf || '').toLowerCase();
+                            const medico = (linha.medico || '').toLowerCase();
+
+                            return paciente.includes(termo) ||
+                                   cpf.includes(termo) ||
+                                   medico.includes(termo);
                         });
-                        
-                        // Validação de busca vazia
+
                         setTimeout(() => {
                             if(table.getData("active").length === 0){
                                 showMessage("Nenhum registro encontrado para esta busca.", "info");
@@ -82,8 +153,36 @@
                             }
                         }, 100);
                     });
+
+                    cadastroForm.addEventListener('submit', function(event) {
+                        event.preventDefault();
+
+                        const payload = getFormData();
+
+                        fetch('/api/agendamentos', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                            .then(response => response.json().then(body => ({ ok: response.ok, body })))
+                            .then(({ ok, body }) => {
+                                if (!ok) {
+                                    showMessage(body.error || 'Falha ao cadastrar agendamento.', 'danger');
+                                    return;
+                                }
+
+                                table.addData([body], true);
+                                cadastroForm.reset();
+                                showMessage('Agendamento cadastrado com sucesso.', 'success');
+                            })
+                            .catch(() => {
+                                showMessage('Erro inesperado ao cadastrar agendamento.', 'danger');
+                            });
+                    });
                 })
-                .catch(error => {
+                .catch(() => {
                     showMessage("Erro inesperado ao conectar com o servidor.", "danger");
                 });
         });

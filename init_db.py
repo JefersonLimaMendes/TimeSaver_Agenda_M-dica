@@ -16,6 +16,20 @@ def init():
             password TEXT NOT NULL
         )
     ''')
+
+    conn.execute('''
+        CREATE TABLE agendamentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT NOT NULL,
+            horario TEXT NOT NULL,
+            paciente TEXT NOT NULL,
+            cpf TEXT NOT NULL,
+            medico TEXT NOT NULL,
+            especialidade TEXT NOT NULL,
+            convenio TEXT NOT NULL,
+            status TEXT NOT NULL
+        )
+    ''')
     
     #Inserção do usuário de teste
     conn.execute('INSERT INTO users (username, password) VALUES (?, ?)', ('admin', 'admin123'))

@@ -20,9 +20,28 @@ def get_db_connection():
         app.logger.error(f"Erro ao conectar com o banco de dados: {e}")
         return None
 
+
+def _is_authenticated():
+    return 'user_id' in session
+
+
+def _normalize_agendamento_payload(payload):
+    required_fields = [
+        'data', 'horario', 'paciente', 'cpf',
+        'medico', 'especialidade', 'convenio', 'status'
+    ]
+
+    normalized = {}
+    for field in required_fields:
+        value = payload.get(field, '') if isinstance(payload, dict) else ''
+        normalized[field] = value.strip() if isinstance(value, str) else ''
+
+    missing = [field for field in required_fields if not normalized[field]]
+    return normalized, missing
+
 @app.route('/', methods=['GET'])
 def index():
-    if 'user_id' not in session:
+    if not _is_authenticated():
         return redirect(url_for('login'))
     return render_template('index.html')
 
@@ -57,7 +76,7 @@ def logout():
 @app.route('/api/proxy/agendamentos', methods=['GET'])
 def proxy_agendamentos():
     """Proxy para buscar dados da API externa e tratar falhas graciosamente."""
-    if 'user_id' not in session:
+    if not _is_authenticated():
         return jsonify({'error': 'Não autorizado'}), 401
     
     try:
@@ -80,6 +99,68 @@ def proxy_agendamentos():
     except ValueError:
         app.logger.error("Erro: Resposta inválida (não é JSON) recebida da API.")
         return jsonify({'error': 'Resposta inválida do serviço de agendamentos.'}), 500
+
+
+@app.route('/api/agendamentos', methods=['GET'])
+def listar_agendamentos_locais():
+    if not _is_authenticated():
+        return jsonify({'error': 'Não autorizado'}), 401
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Falha ao conectar com o banco de dados.'}), 500
+
+    rows = conn.execute(
+        '''
+        SELECT id, data, horario, paciente, cpf, medico, especialidade, convenio, status
+        FROM agendamentos
+        ORDER BY id DESC
+        '''
+    ).fetchall()
+    conn.close()
+
+    return jsonify([dict(row) for row in rows])
+
+
+@app.route('/api/agendamentos', methods=['POST'])
+def cadastrar_agendamento_local():
+    if not _is_authenticated():
+        return jsonify({'error': 'Não autorizado'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    agendamento, missing_fields = _normalize_agendamento_payload(payload)
+
+    if missing_fields:
+        return jsonify({
+            'error': 'Campos obrigatórios ausentes.',
+            'missing_fields': missing_fields
+        }), 400
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Falha ao conectar com o banco de dados.'}), 500
+
+    cursor = conn.execute(
+        '''
+        INSERT INTO agendamentos (data, horario, paciente, cpf, medico, especialidade, convenio, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        (
+            agendamento['data'],
+            agendamento['horario'],
+            agendamento['paciente'],
+            agendamento['cpf'],
+            agendamento['medico'],
+            agendamento['especialidade'],
+            agendamento['convenio'],
+            agendamento['status']
+        )
+    )
+    conn.commit()
+    agendamento['id'] = cursor.lastrowid
+    conn.close()
+
+    return jsonify(agendamento), 201
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
