@@ -202,6 +202,26 @@ def cadastrar_agendamento_local():
             'missing_fields': missing_fields
         }), 400
 
+    # Validação e normalização do CPF no servidor: manter apenas dígitos e exigir 11
+    raw_cpf = agendamento.get('cpf', '')
+    cpf_digits = ''.join(ch for ch in raw_cpf if ch.isdigit())
+    if len(cpf_digits) != 11:
+        return jsonify({'error': 'CPF inválido. Use 11 dígitos.'}), 400
+    # Formata para 000.000.000-00 antes de armazenar
+    agendamento['cpf'] = f"{cpf_digits[0:3]}.{cpf_digits[3:6]}.{cpf_digits[6:9]}-{cpf_digits[9:11]}"
+
+    # Checar colisão: mesmo médico na mesma data e horário
+    conn_check = get_db_connection()
+    if not conn_check:
+        return jsonify({'error': 'Falha ao conectar com o banco de dados.'}), 500
+    exists = conn_check.execute(
+        'SELECT id FROM agendamentos WHERE medico = ? AND data = ? AND horario = ?',
+        (agendamento['medico'], agendamento['data'], agendamento['horario'])
+    ).fetchone()
+    conn_check.close()
+    if exists:
+        return jsonify({'error': 'Já existe um agendamento para este médico neste horário.'}), 409
+
     conn = get_db_connection()
     if not conn:
         return jsonify({'error': 'Falha ao conectar com o banco de dados.'}), 500

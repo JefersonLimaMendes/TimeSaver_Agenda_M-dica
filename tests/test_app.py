@@ -119,3 +119,33 @@ def test_cadastro_e_delecao_agendamento_com_login(client):
     listagem_response = client.get('/api/agendamentos')
     listagem_json = listagem_response.get_json()
     assert all(item['id'] != agendamento_id for item in listagem_json)
+
+
+def test_colisao_horario_medico(client):
+    # login
+    login_response = client.post(
+        '/login',
+        data={'username': 'admin', 'password': 'admin123'},
+        follow_redirects=False
+    )
+    assert login_response.status_code == 302
+
+    payload = {
+        'data': '01/08/2026',
+        'horario': '09:00',
+        'paciente': 'Paciente A',
+        'cpf': '111.222.333-44',
+        'medico': 'Dr. Conflito',
+        'especialidade': 'Clínico',
+        'convenio': 'Unimed',
+        'status': 'Confirmado'
+    }
+
+    r1 = client.post('/api/agendamentos', json=payload)
+    assert r1.status_code == 201
+
+    # Tentativa com mesmo médico/data/horário deve falhar com 409
+    payload2 = payload.copy()
+    payload2['paciente'] = 'Paciente B'
+    r2 = client.post('/api/agendamentos', json=payload2)
+    assert r2.status_code == 409
